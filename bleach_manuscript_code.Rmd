@@ -1,0 +1,1491 @@
+---
+title: "bleach_manuscript_code"
+author: "Kelly Waters"
+date: "2026-03-04"
+output: html_document
+---
+
+packages
+```{r}
+library(tidyverse)
+library(qiime2R)
+library(phyloseq)
+library(vegan)
+library(microbiome)
+library(RColorBrewer)
+library(ggplot2)
+library(hrbrthemes)
+library(ggh4x)
+library(randomForest)
+library(pairwiseAdonis)
+library(knitr)
+library(plyr)
+library(ggpubr)
+library(mia)
+library(miaViz)
+library(NetCoMi)
+library(limma)
+library(sechm)
+library(pheatmap)
+library(stats)
+library(dplyr)
+library(data.table)
+library(MiscMetabar)
+library(circlize)
+library(ggVennDiagram)
+library(microeco)
+library(tidyr)
+library(emmeans)
+library(glue)
+```
+
+read in data + filter
+```{r}
+set.seed(2000)
+setwd("C:/soil_data/summer.soil")
+
+#all together
+phy.summer <-qza_to_phyloseq("summer-table-no-mito.qza","summer-rooted-tree.qza","summer-taxonomy.qza","summer-meta2.tsv")
+
+phy.summer.filt <- prune_samples(sample_sums(phy.summer) >= 12000, phy.summer) #removing samples that have less than 12000 reads, not rarefying any 
+
+```
+
+alpha diversity 
+calculate 
+```{r}
+still_fam <- tax_glom(phy.still, taxrank = "Family")
+aug_richness_all <- estimate_richness(aug_fam, measures = c("Observed", "Shannon", "InvSimpson"))
+```
+
+
+violin alpha diversity plots 
+only stills
+```{r}
+#extract the data from plot_richness
+richness_df <- plot_richness(phy.still, x = "Sampling.point", measures = "Observed")$data
+
+violin.asvs.test4 <- ggplot(richness_df, aes(x = Sampling.point, y = value, fill = Treatment)) +
+  geom_violin(
+    position = position_dodge(width = 0.9),
+    alpha = 0.6,
+    trim = FALSE
+  ) +
+  geom_boxplot(
+    width = 0.15,
+    position = position_dodge(width = 0.9),
+    alpha = 0.8
+  ) +
+  geom_jitter(
+    aes(fill=Treatment),
+    shape = 21,
+    color = "black",
+    position = position_jitterdodge(jitter.width = 0.1, dodge.width = 0.9),
+    size = 1.5,
+    alpha = 0.9,
+    show.legend = FALSE
+  ) +
+  theme_classic() +
+  scale_fill_brewer(palette = "Paired") +
+  scale_color_brewer(palette = "Paired") +
+  xlab("Sampling Point") +
+  ylab("ASV Richness")
+violin.asvs.test4
+
+#family level
+still_fam <- tax_glom(phy.still, taxrank = "Family")
+richness_df_fam <- plot_richness(still_fam, x = "Sampling.point", measures = "Observed")$data
+
+violin.fam.still <- ggplot(richness_df_fam, aes(x = Sampling.point, y = value, fill = Treatment)) +
+  geom_violin(
+    position = position_dodge(width = 0.9),
+    alpha = 0.6,
+    trim = FALSE
+  ) +
+  geom_boxplot(
+    width = 0.15,
+    position = position_dodge(width = 0.9),
+    alpha = 0.8
+  ) +
+  geom_jitter(
+    aes(fill=Treatment),
+    shape = 21,
+    color = "black",
+    position = position_jitterdodge(jitter.width = 0.1, dodge.width = 0.9),
+    size = 1.5,
+    alpha = 0.9,
+    show.legend = FALSE
+  ) +
+  theme_classic() +
+  scale_fill_brewer(palette = "Paired") +
+  scale_color_brewer(palette = "Paired") +
+  xlab("Sampling Point") +
+  ylab("Bacterial Family Richness")
+violin.fam.still
+
+still_richness_all2 <- estimate_richness(still_fam, measures = c("Observed", "Shannon", "InvSimpson"))
+still_meta <- read.delim("still-meta.txt") #metadata file with Sample.ID and sample names with . not -
+still_richness4 <- setDT(still_richness_all2, keep.rownames = "Sample.ID")
+still.div.meta <- merge(still_richness4, still_meta, by='Sample.ID', all.x=TRUE)
+still.div.meta2 <- merge(still_richness4, still_meta, by='Sample.ID', all.x=TRUE)
+file.path <- "C:/soil_data/summer.soil/plots/still_alpha_wmeta.csv"
+write.csv(still.div.meta2, file=file.path)
+```
+
+anova for alpha diversity
+```{r}
+#aggregate to get the average of the body site, treatment, and day
+#soil_alpha_ag <- aggregate(cbind(Observed, Shannon, InvSimpson)~Treatment+Sampling.point+Sampling.location, still.div.meta2, FUN=mean)
+
+##splitting data frame to each body site 
+
+#stillnew <- split(still.div.meta2, still.div.meta2$Sampling.location)
+#sidenew <- stillnew$S
+#undernew <- stillnew$U
+#undernew<- undernew %>% mutate(Sampling.point = factor(Sampling.point))
+#sidenew <- sidenew%>% mutate(Sampling.point=factor(Sampling.point))
+
+side_alphao <- lm(Observed~Treatment*Sampling.point, data = sidenew)
+summary(side_alphao)
+plot(side_alphao)
+
+side_alphash <- lm(Shannon~Treatment*Sampling.point, data = sidenew)
+summary(side_alphash)
+plot(side_alphash)
+
+side_alphais <- lm(InvSimpson~Treatment*Sampling.point, data = sidenew)
+summary(side_alphais)
+plot(side_alphais)
+
+under_alphao <- lm(Observed~Treatment*Sampling.point, data = undernew)
+summary(under_alphao)
+plot(under_alphao)
+
+under_alphas <- lm(Shannon~Treatment*Sampling.point, data = undernew)
+summary(under_alphas)
+plot(under_alphas)
+
+
+under_alphais <- lm(InvSimpson~Treatment*Sampling.point, data = undernew)
+summary(under_alphais)
+plot(under_alphais)
+
+```
+pot-hoc testing
+```{r}
+contuo<-emmeans(under_alphao,~Sampling.point*Treatment)
+contuo
+contrast<-as.data.frame(contrast(contuo, method = "pairwise")) 
+contrast %>% arrange(p.value)
+
+contus<-emmeans(under_alphas,~Sampling.point*Treatment)
+contus
+contrasts<-as.data.frame(contrast(contus, method = "pairwise")) 
+contrasts %>% arrange(p.value)
+
+contuis<-emmeans(under_alphais,~Sampling.point*Treatment)
+contuis
+contrastis<-as.data.frame(contrast(contuis, method = "pairwise")) 
+contrastis %>% arrange(p.value)
+
+```
+
+
+filter the one object by stillborn (bleach trials)
+```{r}
+phy.still <- subset_samples(phy.summer.filt, Size=="Still")
+```
+
+pcoa of only the stills 
+color by bleach/control, shape is side or under
+weighted unifrac
+```{r}
+ord.still = ordinate(phy.still, "PCoA", "unifrac", weighted=TRUE)
+
+plot.ord.still.wu <- plot_ordination(phy.still, ord.still, color = "Treatment", shape="Sampling.location" )+
+  geom_point(alpha = 0.7,size = 8) +
+  xlab("PCoA1 (58.2%)") +
+  ylab("PCoA2 (7%)") +
+  theme_classic() +
+  scale_color_brewer(palette = "Set1")+
+  ggtitle("Weighted UniFrac Stills")+
+  stat_ellipse(level=0.95)
+plot.ord.still.wu$layers <- plot.ord.still.wu$layers[-1]
+plot.ord.still.wu
+```
+
+permanova
+```{r}
+GPdist.still=phyloseq::distance(phy.still, "wunifrac")
+
+still.adonis <- adonis2(GPdist.still ~ Treatment*Sampling.location, as(sample_data(phy.still), "data.frame"), by="terms")
+still.adonis
+```
+
+comparing bleach vs control of the under samples 
+```{r}
+GPdist.still=phyloseq::distance(phy.still, "wunifrac")
+
+still.adonis <- adonis2(GPdist.still ~ Treatment*Sampling.location, as(sample_data(phy.still), "data.frame"), by="terms")
+still.adonis
+```
+
+
+
+re-do all of this at family level
+pcoa
+```{r}
+still_fam <- tax_glom(phy.still, taxrank = "Family")
+ord.still.fam = ordinate(phy.summer.filt, "PCoA", "unifrac", weighted=TRUE)
+
+plot.ord.still.fam <- plot_ordination(still_fam, ord.still.fam, color = "Treatment", shape="Sampling.location" )+
+  geom_point(alpha = 0.7,size = 8) +
+  xlab("PCoA1 (58.2%)") +
+  ylab("PCoA2 (7%)") +
+  theme_classic() +
+  scale_color_manual (values=c("skyblue3","violetred4"), labels = c("Bleach", "Control"))+
+  guides(shape=guide_legend(title = "Location"))+
+  scale_shape_discrete(labels = c("Control", "Under Carcass"))+
+  stat_ellipse(level=0.95)
+plot.ord.still.fam$layers <- plot.ord.still.fam$layers[-1]
+plot.ord.still.fam
+```
+
+permanova
+asv
+```{r}
+GPdist.still=phyloseq::distance(phy.still, "wunifrac")
+
+still.adonis <- adonis2(GPdist.still ~ Treatment*Sampling.location, as(sample_data(phy.still), "data.frame"), by="terms")
+still.adonis
+
+
+still.adonis2 <- adonis2(GPdist.still.fam ~ Treatment*Sampling.location*Sampling.point, as(sample_data(phy.still), "data.frame"), by="terms")
+still.adonis2
+```
+
+family level
+```{r}
+GPdist.still.fam=phyloseq::distance(still_fam, "wunifrac")
+
+still.adonis.fam <- adonis2(GPdist.still ~ Treatment*Sampling.location, as(sample_data(still_fam), "data.frame"), by="terms")
+still.adonis.fam
+
+
+still.adonis.fam2 <- adonis2(GPdist.still.fam ~ Treatment*Sampling.location*Sampling.point, as(sample_data(still_fam), "data.frame"), by="terms")
+still.adonis.fam2
+
+#under only
+GPdist.still.famu=phyloseq::distance(phy.still.fam.under, "wunifrac")
+still.adonis.famu <- adonis2(GPdist.still.famu ~ Treatment*Sampling.point,as(sample_data(phy.still.fam.under), "data.frame"), by="terms")
+still.adonis.famu
+
+```
+
+pairwise permanova
+family
+```{r}
+#doing just under
+phy.still.fam.under <- subset_samples(still_fam, Sampling.location=="U")
+
+still.fam_dist_matrix <- phyloseq::distance(phy.still.fam.under, method="wunifrac")
+vegan::adonis2(still.fam_dist_matrix ~ phyloseq::sample_data(ps_still.famu)$Sampling.point)
+
+results.famu
+write.csv(results.famu, "still-sampling.pointu-pairwise-wunifac.csv")
+```
+
+
+bar plot
+```{r}
+merge_less_than_top <- function(pobject, top=7){
+  transformed <- transform_sample_counts(pobject, function(x) x/sum(x))
+  otu.table <- as.data.frame(otu_table(transformed))
+  otu.sort <- otu.table[order(rowMeans(otu.table), decreasing = TRUE),]
+  otu.list <- row.names(otu.sort[(top+1):nrow(otu.sort),])
+  merged <- merge_taxa(transformed, otu.list, 1)
+  for (i in 1:dim(tax_table(merged))[1]){
+    if (is.na(tax_table(merged)[i,2])){
+      taxa_names(merged)[i] <- "Other"
+      tax_table(merged)[i,1:7] <- "Other"}
+  }
+  return(merged)
+}
+
+family_order <- c("Chitinophagaceae", "Chthoniobacteraceae", "Comamonadaceae", "Flavobacteriaceae", "Nitrosomonadaceae", "Planococcaceae", "Sphingomonadaceae", "uncultured", "Vicinamibacteraceae", "Wohlfahrtiimonadaceae", "Xanthobacteraceae", "Other")
+family_colors <- c("Chitinophagaceae"="#8DD3C7", "Chthoniobacteraceae"="#FFFFB3", "Comamonadaceae"="#BEBADA", "Flavobacteriaceae"="#FB8072", "Nitrosomonadaceae"="#80B1D3", "Planococcaceae"="#FDB462", "Sphingomonadaceae"="#B3DE69", "uncultured"="#FCCDE5" , "Vicinamibacteraceae"="#FFED6F", "Wohlfahrtiimonadaceae"="#BC80BD", "Xanthobacteraceae"="#CCEBC5", "Other"="#D9D9D9" )
+still.fam.top10 <- merge_less_than_top(still_fam, top=9)
+
+anew2 <- plot_bar(still.fam.top10,fill = "Family")+
+  scale_fill_manual(values=family_colors)+
+  ylab("Relative Abundance (%)")
+anew2 <- anew2 + facet_wrap(~Treatment, scales="free_x") #gets rid of the empty space
+anew2
+
+still.fam.top12 <- merge_less_than_top(still_fam, top=11)
+
+anew3 <- plot_bar(still.fam.top12,fill = "Family")+
+  scale_fill_manual(values=family_colors, breaks = family_order)+
+  ylab("Relative Abundance (%)")
+anew3 <- anew3 + facet_wrap(~Treatment, scales="free_x") #gets rid of the empty space
+anew3
+```
+
+
+
+random forest
+this is side and under
+using both bleach and control to predict sampling point
+```{r}
+set.seed(2000)
+GPr.soil  = transform_sample_counts(phy.still, function(x) x / sum(x) ) #transform samples based on relative abundance
+GPr.soil = filter_taxa(GPr.soil, function(x) mean(x) > 1e-5, TRUE)
+
+Family.soil<-tax_glom(GPr.soil,"Family")
+
+otu.soil<-t(otu_table(Family.soil))
+
+df_soil<-as.data.frame(otu.soil)
+taxa_names(Family.soil)
+tax_table(Family.soil)
+identical(colnames(df_soil), taxa_names(Family.soil))
+colnames(df_soil)<-as.data.frame(tax_table(Family.soil))$Family
+df_soil
+
+
+predictors.soil=t(otu_table(Family.soil))
+response.soil <- as.factor(sample_data(Family.soil)$Sampling.point)
+rf.data.soil <- data.frame(response.soil, df_soil)
+
+soilForest.f <- randomForest(response.soil~., data = rf.data.soil, ntree = 1000)
+print(soilForest.f)
+```
+
+
+now predict treatment
+```{r}
+
+df_soilc<-as.data.frame(otu.soil)
+taxa_names(Family.soil)
+tax_table(Family.soil)
+identical(colnames(df_soilc), taxa_names(Family.soil))
+colnames(df_soilc)<-as.data.frame(tax_table(Family.soil))$Family
+df_soilc
+
+
+#predictors.soil=t(otu_table(Family.soil))
+response.soilc <- as.factor(sample_data(Family.soil)$Treatment)
+rf.data.soilc <- data.frame(response.soilc, df_soilc)
+
+soilForest.fc <- randomForest(response.soilc~., data = rf.data.soilc, ntree = 1000)
+print(soilForest.fc)
+```
+
+now just using the under samples 
+```{r}
+phy.still.under <- subset_samples(phy.still, Sampling.location=="U")
+
+GPr.soilu  = transform_sample_counts(phy.still.under, function(x) x / sum(x) ) #transform samples based on relative abundance
+GPr.soilu = filter_taxa(GPr.soilu, function(x) mean(x) > 1e-5, TRUE)
+
+Family.soilu<-tax_glom(GPr.soilu,"Family")
+
+otu.soilu<-t(otu_table(Family.soilu))
+
+df_soilu<-as.data.frame(otu.soilu)
+taxa_names(Family.soilu)
+tax_table(Family.soilu)
+identical(colnames(df_soilu), taxa_names(Family.soilu))
+colnames(df_soilu)<-as.data.frame(tax_table(Family.soilu))$Family
+df_soilu
+
+
+predictors.soilu=t(otu_table(Family.soilu))
+response.soilu <- as.factor(sample_data(Family.soilu)$Sampling.point)
+rf.data.soilu <- data.frame(response.soilu, df_soilu)
+
+soilForest.fu <- randomForest(response.soilu~., data = rf.data.soilu, ntree = 1000)
+print(soilForest.fu)
+
+```
+saved 1100x650
+```{r}
+imp.soilu <- importance(soilForest.fu)#all the steps that are imp or imp. are building a dataframe that contains info about the taxa used by the Random Forest test to classify treatment 
+imp.soilu <- data.frame(predictors = rownames(imp.soilu), imp.soilu)
+imp.soilu.sort <- arrange(imp.soilu, dplyr::desc(MeanDecreaseGini))
+imp.soilu.sort$predictors <- factor(imp.soilu.sort$predictors, levels = imp.soilu.sort$predictors)
+imp.soilu.20 <- imp.soilu.sort[1:14, ]
+imp.soilu.20
+
+soilu_all_imp <- ggplot(`imp.soilu.20`, aes(x = predictors, y = MeanDecreaseGini)) +
+  geom_bar(stat = "identity", fill = "lightblue4") +
+  coord_flip() +
+  xlab("Important Bacterial Families")+
+  ylab("Mean Decrease Gini")+
+  theme_bw()
+soilu_all_imp
+
+
+imp.soil.5<-imp.soilu.20 %>% head(7)
+  
+```
+
+importance barplots
+saved 1900x900
+```{r, echo=TRUE}
+imp.soil.5<-imp.soilu.20 %>% head(7)
+
+names.fam<-factor(imp.soil.5$predictors)
+
+soil.top.5<-rf.data.soilu %>% select(all_of(names.fam)) %>% mutate(Sampling.point = response.soilu)
+
+soil.rf.barplot <- soil.top.5 %>% pivot_longer(1:7, names_to = "Family", values_to ="Abundance") %>% dplyr::mutate(Abundance = 100*Abundance) %>% 
+dplyr::group_by(Sampling.point, Family) %>% dplyr::summarise(mean = mean(Abundance), 
+                                            N = length(Abundance),
+                 sd   = sd(Abundance),
+                 se   = sd / sqrt(N)) %>% 
+  ggplot(aes(x=Family,y=mean))+geom_bar(aes(fill = Family),colour="black", stat="identity")+ facet_grid(~Family)+xlab("Family")+ylab("Relative Abundance") + theme(axis.text.x = element_text(angle = 45, hjust = 1))+theme(axis.title.x=element_blank())+facet_wrap(~Sampling.point,scales = "free_y")+geom_errorbar(aes(ymin=mean-se,ymax=mean+se), width=0.5)+scale_fill_brewer(palette="Set1")
+
+soil.rf.barplot
+```
+
+
+```{r, echo=TRUE}
+cdataplots=ggplot(Trtdatas, aes(x=Family,y=mean))+geom_bar(aes(fill = Family),colour="black", stat="identity")+ facet_grid(~Family)+xlab("Family")+ylab("Relative Abundance") + theme(axis.text.x = element_text(angle = 45, hjust = 1))+theme(axis.title.x=element_blank())+facet_wrap(~Sampling.point,scales = "free_y")+geom_errorbar(aes(ymin=mean-se,ymax=mean+se))+scale_fill_brewer(palette="Set1")
+cdataplots
+
+cdataplots2=ggplot(Trtdatas, aes(x=Family,y=mean))+geom_bar(aes(fill = Family),colour="black", stat="identity")+ facet_grid(~Family)+ylab("Relative Abundance") +theme(axis.title.x=element_blank())+facet_wrap(~Sampling.point,scales = "free_y")+geom_errorbar(aes(ymin=mean-se,ymax=mean+se))+scale_fill_brewer(palette="Set1")
+cdataplots2
+
+
+compare_means(Abundance ~ sample_Family, data = df, group.by = "Family", p.adjust.method = "fdr",method="kruskal.test")
+#bacterial relative abundance, kruskal-wallis
+```
+
+
+just control samples underneath carcass
+```{r}
+phy.still.under.cntrl <- subset_samples(phy.still.under, Treatment=="Control")
+
+GPr.soiluc  = transform_sample_counts(phy.still.under.cntrl, function(x) x / sum(x) ) #transform samples based on relative abundance
+GPr.soiluc = filter_taxa(GPr.soiluc, function(x) mean(x) > 1e-5, TRUE)
+
+Family.soiluc<-tax_glom(GPr.soiluc,"Family")
+
+otu.soiluc<-t(otu_table(Family.soiluc))
+
+df_soiluc<-as.data.frame(otu.soiluc)
+taxa_names(Family.soiluc)
+tax_table(Family.soiluc)
+identical(colnames(df_soiluc), taxa_names(Family.soiluc))
+colnames(df_soiluc)<-as.data.frame(tax_table(Family.soiluc))$Family
+df_soiluc
+
+
+#predictors.soiluc=t(otu_table(Family.soiluc))
+response.soiluc <- as.factor(sample_data(Family.soiluc)$Sampling.point)
+rf.data.soiluc <- data.frame(response.soiluc, df_soiluc)
+
+soilForest.fuc <- randomForest(response.soiluc~., data = rf.data.soiluc, ntree = 1000)
+print(soilForest.fuc)
+```
+
+bleach samples underneath carcass now
+```{r}
+phy.still.under.bleach <- subset_samples(phy.still.under, Treatment=="Bleach")
+
+GPr.soilub  = transform_sample_counts(phy.still.under.bleach, function(x) x / sum(x) ) #transform samples based on relative abundance
+GPr.soilub = filter_taxa(GPr.soilub, function(x) mean(x) > 1e-5, TRUE)
+
+Family.soilub<-tax_glom(GPr.soilub,"Family")
+
+otu.soilub<-t(otu_table(Family.soilub))
+
+df_soilub<-as.data.frame(otu.soilub)
+taxa_names(Family.soilub)
+tax_table(Family.soilub)
+identical(colnames(df_soilub), taxa_names(Family.soilub))
+colnames(df_soilub)<-as.data.frame(tax_table(Family.soilub))$Family
+df_soilub
+
+
+response.soilub <- as.factor(sample_data(Family.soilub)$Sampling.point)
+rf.data.soilub <- data.frame(response.soilub, df_soilub)
+
+soilForest.fub <- randomForest(response.soilub~., data = rf.data.soilub, ntree = 1000)
+print(soilForest.fub)
+```
+
+
+
+***********************************
+read in all beetle and swab data
+```{r}
+set.seed(2000)
+setwd("C:/beetle_data_analysis/summer_beetles_all")
+phy.all.summerba<-qza_to_phyloseq("sba-no-mito.qza","sba-rooted-tree.qza","sba-taxonomy.qza","summer_meta_allbeetles.txt")
+```
+
+now subset only beetles 
+```{r}
+phy.summer.beetles <- subset_samples(phy.all.summerba, Order=="Coleoptera")
+
+```
+only summer beetles now 
+```{r}
+phy.ch4.beetles1a <- subset_samples(phy.summer.beetles, Carcass %in% c("C22", "C23", "C24", "C25", "C26", "B1", "B2", "B3", "B4", "B5"))
+phy.ch4.beetles2a <- subset_samples(phy.ch4.beetles1a, Family != "")#only beetles identified to family included
+
+```
+
+
+and only swabs 
+```{r}
+phy.summer.swabs <- subset_samples(phy.all.summerba, Order=="Swab")
+phy.ch4.swabsa <- subset_samples(phy.summer.swabs, Carcass %in% c("C22", "C23", "C24", "C25", "C26", "B1", "B2", "B3", "B4", "B5"))
+
+```
+
+beetles and swabs
+```{r}
+phy.swab.beetle <- subset_samples(phy.all.summerba, Order %in% c("Coleoptera", "Swab"))
+phy.swab.beetle <- subset_samples(phy.swab.beetle, Carcass %in% c("C22", "C23", "C24", "C25", "C26", "B1", "B2", "B3", "B4", "B5"))
+```
+
+
+
+beetles!
+alpha diversity 
+```{r}
+beetle_richness_all2 <- estimate_richness(beetles_fam, measures = c("Observed", "Shannon", "InvSimpson"))
+setwd("C:/soil_data/summer.soil")
+beetle_meta <- read.delim("beetles_meta.txt") #metadata file with Sample.ID and sample names with . not -
+beetle_richness4 <- setDT(beetle_richness_all2, keep.rownames = "Sample.ID")
+beetle.div.meta <- merge(beetle_richness4, beetle_meta, by='Sample.ID', all.x=TRUE)
+beetle.div.meta2 <- merge(beetle_richness4, beetle_meta, by='Sample.ID', all.x=TRUE)
+file.pathb <- "C:/soil_data/summer.soil/plots/beetle_alpha_wmeta.csv"
+write.csv(beetle.div.meta2, file=file.pathb)
+```
+
+pcoa first
+saving 1050x700
+```{r}
+beetles_fam <- tax_glom(phy.ch4.beetles2a, taxrank = "Family")
+ord.beetles = ordinate(phy.ch4.beetles2a, "PCoA", "unifrac", weighted=TRUE)
+ord.beetles.fam = ordinate(beetles_fam, "PCoA", "unifrac", weighted=TRUE)
+
+plot.ord.sbeetles <- plot_ordination(phy.ch4.beetles2a, ord.beetles, color = "Carcass", shape="Sampling.point" )+
+  geom_point(alpha = 0.7,size = 8) +
+  xlab("PCoA1 (54%)") +
+  ylab("PCoA2 (32.2%)") +
+  theme_classic() +
+  scale_color_brewer (palette = "Set3")+
+  scale_fill_discrete(labels = c("Control", "Under Carcass"))+
+  stat_ellipse(level=0.95)
+plot.ord.sbeetles$layers <- plot.ord.sbeetles$layers[-1]
+plot.ord.sbeetles
+
+plot.ord.sbeetles2 <- plot_ordination(phy.ch4.beetles2a, ord.beetles, color = "Family", shape="Sampling.point" )+
+  geom_point(alpha = 0.7,size = 8) +
+  xlab("PCoA1 (54%)") +
+  ylab("PCoA2 (32.2%)") +
+  theme_classic() +
+  scale_color_brewer (palette = "Set3")+
+  stat_ellipse(level=0.95)
+plot.ord.sbeetles2$layers <- plot.ord.sbeetles2$layers[-1]
+plot.ord.sbeetles2
+
+
+##family level 
+plot.ord.sbeetles.fam <- plot_ordination(phy.ch4.beetles2a, ord.beetles.fam,color = "Family", shape="Sampling.point" )+
+  geom_point(alpha = 0.7,size = 8) +
+  xlab("PCoA1 (23.1%)") +
+  ylab("PCoA2 (13.9%)") +
+  theme_classic() +
+  scale_color_brewer (palette = "Set3")+
+  stat_ellipse(level=0.95)
+plot.ord.sbeetles.fam$layers <- plot.ord.sbeetles.fam$layers[-1]
+plot.ord.sbeetles.fam
+
+```
+
+
+beetle bar plot of top 11 taxa 
+```{r}
+merge_less_than_top <- function(pobject, top=7){
+  transformed <- transform_sample_counts(pobject, function(x) x/sum(x))
+  otu.table <- as.data.frame(otu_table(transformed))
+  otu.sort <- otu.table[order(rowMeans(otu.table), decreasing = TRUE),]
+  otu.list <- row.names(otu.sort[(top+1):nrow(otu.sort),])
+  merged <- merge_taxa(transformed, otu.list, 1)
+  for (i in 1:dim(tax_table(merged))[1]){
+    if (is.na(tax_table(merged)[i,2])){
+      taxa_names(merged)[i] <- "Other"
+      tax_table(merged)[i,1:7] <- "Other"}
+  }
+  return(merged)
+}
+family_orderb <- c("Enterobacteriaceae", "Erysipelotrichaceae", "Lactobacillaceae", "Morganellaceae", "Planococcaceae", "Rhizobiaceae", "Spiroplasmataceae", "Streptococcaceae", "Vagococcaceae", "Wohlfahrtiimonadaceae", "Xanthobacteraceae", "Other")
+family_colorsb <- c("Enterobacteriaceae"="#8DD3C7", "Erysipelotrichaceae"="#FFFFB3", "Lactobacillaceae"="#BEBADA", "Morganellaceae"="#FB8072", "Planococcaceae"="#80B1D3", "Rhizobiaceae"="#FDB462", "Spiroplasmataceae"="#B3DE69", "Streptococcaceae"="#FCCDE5" , "Vagococcaceae"="#FFED6F", "Wohlfahrtiimonadaceae"="#BC80BD", "Xanthobacteraceae"="#CCEBC5", "Other"="#D9D9D9" )
+
+
+beetle.fam.top10 <- merge_less_than_top(beetles_fam, top=9)
+
+bnew2 <- plot_bar(beetle.fam.top10,fill = "Family")+
+  scale_fill_brewer(palette="Set3")+
+  ylab("Relative Abundance")
+bnew2 <- bnew2 + facet_wrap(~sample_Family, scales="free_x") #gets rid of the empty space
+bnew2
+
+beetle.fam.top12 <- merge_less_than_top(beetles_fam, top=11)
+
+bnew3 <- plot_bar(beetle.fam.top12,fill = "Family")+
+  scale_fill_manual(values = family_colorsb, breaks = family_orderb) +
+  ylab("Relative Abundance")
+bnew3 <- bnew3 + facet_wrap(~sample_Family, scales="free_x") #gets rid of the empty space
+bnew3
+
+bnew4 <- plot_bar(beetle.fam.top12,fill = "Family")+
+  scale_fill_manual(values = family_colorsb, breaks = family_orderb) +
+  ylab("Relative Abundance (%)")
+bnew4 <- bnew4 + facet_grid(~sample_Family, scales="free_x", space="free_x") #gets rid of the empty space
+bnew4
+
+bnew5 <- plot_bar(beetle.fam.top12,fill = "Family")+
+  scale_fill_manual(values = family_colorsb, breaks = family_orderb) +
+  ylab("Relative Abundance")
+bnew5 <- bnew5 + facet_grid(~sample_Family, scales="free_x", space="free_x")+theme(
+    strip.text.x = element_text(
+      angle = 45,     # angle upwards
+      hjust = 0,      # left-justify so text extends into the panel
+      vjust = 0.5,
+      size = 9
+    )) #gets rid of the empty space
+bnew5
+
+```
+
+
+
+beetle permanova
+permanova
+```{r}
+GPdist.beetle=phyloseq::distance(phy.ch4.beetles2a, "wunifrac")
+
+beetle.adonis <- adonis2(GPdist.beetle ~ Family*Sampling.point, as(sample_data(phy.ch4.beetles2a), "data.frame"), by="terms")
+beetle.adonis
+
+beetle.adonis2 <- adonis2(GPdist.beetle ~ Family*Carcass, as(sample_data(phy.ch4.beetles2a), "data.frame"), by="terms")
+beetle.adonis2
+
+```
+family level permanova
+```{r}
+GPdist.beetlef=phyloseq::distance(beetles_fam, "wunifrac")
+
+beetle.adonisf <- adonis2(GPdist.beetlef ~ Family*Sampling.point, as(sample_data(beetles_fam), "data.frame"), by="terms")
+beetle.adonisf
+
+beetle.adonis2f <- adonis2(GPdist.beetlef ~ Family*Carcass, as(sample_data(beetles_fam), "data.frame"), by="terms")
+beetle.adonis2f
+
+beetle.adonis2f2 <- adonis2(GPdist.beetlef ~ Family*Treatment.1, as(sample_data(beetles_fam), "data.frame"), by="terms")
+beetle.adonis2f2
+```
+
+
+
+random forest
+beetles 
+```{r}
+set.seed(2000)
+GPr.beetles  = transform_sample_counts(phy.ch4.beetles2a, function(x) x / sum(x) ) #transform samples based on relative abundance
+GPr.beetles = filter_taxa(GPr.beetles, function(x) mean(x) > 1e-5, TRUE)
+Family.b<-tax_glom(GPr.beetles,"Family")
+
+otu.famsb<-t(otu_table(Family.b))
+
+df_famsb<-as.data.frame(otu.famsb)
+taxa_names(Family.b)
+tax_table(Family.b)
+identical(colnames(df_famsb), taxa_names(Family.b))
+colnames(df_famsb)<-as.data.frame(tax_table(Family.b))$Family
+df_famsb
+
+
+predictors.swabsb=t(otu_table(Family.b))
+response.beetlesf <- as.factor(sample_data(Family.b)$Family)
+rf.data.beetlesf <- data.frame(response.beetlesf, df_famsb)
+
+betForest.f <- randomForest(response.beetlesf~., data = rf.data.beetlesf, ntree = 1000)
+print(betForest.f)#returns overall Random Forest results
+```
+saved 1100x650
+```{r}
+imp.bet <- importance(betForest.f)#all the steps that are imp or imp. are building a dataframe that contains info about the taxa used by the Random Forest test to classify treatment 
+imp.bet <- data.frame(predictors = rownames(imp.bet), imp.bet)
+imp.bet.sort <- arrange(imp.bet, dplyr::desc(MeanDecreaseGini))
+imp.bet.sort$predictors <- factor(imp.bet.sort$predictors, levels = imp.bet.sort$predictors)
+imp.bet.20 <- imp.bet.sort[1:14, ]
+imp.bet.20
+
+bet_all_imp <- ggplot(`imp.bet.20`, aes(x = predictors, y = MeanDecreaseGini)) +
+  geom_bar(stat = "identity", fill = "lightblue4") +
+  coord_flip() +
+  xlab("Important Bacterial Families")+
+  ylab("Mean Decrease Gini")+
+  theme_bw()
+bet_all_imp
+  
+```
+
+saved 1900x900
+```{r, echo=TRUE}
+imp.bet.5<-imp.bet.20 %>% head(7)
+
+names.fam<-factor(imp.bet.5$predictors)
+
+bet.top.5<-rf.data.beetlesf %>% select(all_of(names.fam)) %>% mutate(Family = response.beetlesf)
+
+bet.rf.barplot <- bet.top.5 %>% pivot_longer(1:7, names_to = "Family.tax", values_to ="Abundance") %>% dplyr::mutate(Abundance = 100*Abundance) %>% 
+dplyr::group_by( Family,Family.tax) %>% dplyr::summarise(mean = mean(Abundance), 
+                                            N = length(Abundance),
+                 sd   = sd(Abundance),
+                 se   = sd / sqrt(N)) %>% 
+  ggplot(aes(x=Family.tax,y=mean))+geom_bar(aes(fill = Family.tax),colour="black", stat="identity")+ facet_grid(~Family)+xlab("Family")+ylab("Relative Abundance") + theme(axis.text.x = element_text(angle = 45, hjust = 1))+theme(axis.title.x=element_blank())+facet_wrap(~Family,scales = "free_y")+geom_errorbar(aes(ymin=mean-se,ymax=mean+se), width=0.5)+scale_fill_brewer(palette="Set1")
+
+bet.rf.barplot
+```
+
+
+beetle internal microbiome random forest, bleach and control carcasses separately 
+```{r}
+#first bleach
+
+phy.beetles.bleach <- subset_samples(phy.ch4.beetles2a, Carcass %in% c("B1", "B2", "B3", "B4", "B5"))
+
+#beetles_bleach_fam <- tax_glom(phy.beetles.bleach, taxrank = "Family")
+
+set.seed(2000)
+GPr.beetlesb  = transform_sample_counts(phy.beetles.bleach, function(x) x / sum(x) ) #transform samples based on relative abundance
+GPr.beetlesb = filter_taxa(GPr.beetlesb, function(x) mean(x) > 1e-5, TRUE)
+
+Family.bb<-tax_glom(GPr.beetlesb,"Family")
+
+otu.famsbb<-t(otu_table(Family.bb))
+
+df_famsbb<-as.data.frame(otu.famsbb)
+taxa_names(Family.bb)
+tax_table(Family.bb)
+identical(colnames(df_famsbb), taxa_names(Family.bb))
+colnames(df_famsbb)<-as.data.frame(tax_table(Family.bb))$Family
+df_famsbb
+
+
+predictors.swabsbb=t(otu_table(Family.bb))
+response.beetlesfb <- as.factor(sample_data(Family.bb)$Family)
+rf.data.beetlesfb <- data.frame(response.beetlesfb, df_famsbb)
+
+betForest.fb <- randomForest(response.beetlesfb~., data = rf.data.beetlesfb, ntree = 1000)
+print(betForest.fb)#returns overall Random Forest results
+
+```
+bleach importance plots
+```{r}
+imp.betb <- importance(betForest.fb)#all the steps that are imp or imp. are building a dataframe that contains info about the taxa used by the Random Forest test to classify treatment 
+imp.betb <- data.frame(predictors = rownames(imp.betb), imp.betb)
+imp.sort.betb <- arrange(imp.betb, dplyr::desc(MeanDecreaseGini))
+imp.sort.betb$predictors <- factor(imp.sort.betb$predictors, levels = imp.sort.betb$predictors)
+imp.20.betb <- imp.sort.betb[1:15, ]
+imp.bet.plotb <- ggplot(imp.20.betb, aes(x = predictors, y = MeanDecreaseGini)) +
+  geom_bar(stat = "identity", fill = "lightblue4") +
+  coord_flip() +
+  ggtitle("Most important families bleach beetles")#\n in a string tells it to start a new line
+imp.bet.plotb
+#imp.20$MeanDecreaseGini
+otunames.betb <- imp.20.betb$predictors
+r.betb <- rownames(tax_table(Family.betb)) %in% otunames.betb
+otunames.betb
+PredictorTable.betb<-kable(tax_table(Family.betb)[r.betb, ])#returns a list of the most important predictors for Random Forest Classification
+PredictorTable.betb
+```
+
+importance barplots
+saved 1900x900
+```{r, echo=TRUE}
+FambsRandomForestSubsetb = subset_taxa(Family.betb, row.names(tax_table(Family.betb))%in% otunames.betb)
+FambsRandomForestSubsetb
+
+dfb <- psmelt(FambsRandomForestSubsetb)
+dfb$Abundance=dfb$Abundance*100
+Trtdatab <- ddply(dfb, c("sample_Family", "Family"), summarise,
+                 N    = length(Abundance),
+                 mean = mean(Abundance),
+                 sd   = sd(Abundance),
+                 se   = sd / sqrt(N)
+)
+Trtdatab
+
+cdataplotb=ggplot(Trtdatab, aes(x=Family,y=mean))+geom_bar(aes(fill = Family),colour="black", stat="identity")+ facet_grid(~Family)+xlab("Family")+ylab("Relative Abundance") + theme(axis.text.x = element_text(angle = 45, hjust = 1))+theme(axis.title.x=element_blank())+facet_wrap(~sample_Family,scales = "free_y")+geom_errorbar(aes(ymin=mean-se,ymax=mean+se))+scale_fill_brewer(palette="Set1")
+cdataplotb
+
+cdataplot2b=ggplot(Trtdatab, aes(x=Family,y=mean))+geom_bar(aes(fill = Family),colour="black", stat="identity")+ facet_grid(~Family)+ylab("Relative Abundance") +theme(axis.title.x=element_blank())+facet_wrap(~sample_Family,scales = "free_y")+geom_errorbar(aes(ymin=mean-se,ymax=mean+se))+scale_fill_brewer(palette="Set1")
+cdataplot2b
+
+
+compare_means(Abundance ~ sample_Family, data = dfb, group.by = "Family", p.adjust.method = "fdr",method="kruskal.test")
+#bacterial relative abundance, kruskal-wallis
+```
+
+now control carcasses only 
+```{r}
+phy.beetles.cntrl <- subset_samples(phy.ch4.beetles2a, Carcass %in% c("C22", "C23", "C24", "C25", "C26"))
+
+set.seed(2000)
+GPr.beetlesc  = transform_sample_counts(phy.beetles.cntrl, function(x) x / sum(x) ) #transform samples based on relative abundance
+GPr.beetlesc = filter_taxa(GPr.beetlesc, function(x) mean(x) > 1e-5, TRUE)
+
+Family.bbc<-tax_glom(GPr.beetlesc,"Family")
+
+otu.famsbbc<-t(otu_table(Family.bbc))
+
+df_famsbbc<-as.data.frame(otu.famsbbc)
+taxa_names(Family.bbc)
+tax_table(Family.bbc)
+identical(colnames(df_famsbbc), taxa_names(Family.bbc))
+colnames(df_famsbbc)<-as.data.frame(tax_table(Family.bbc))$Family
+df_famsbbc
+
+
+predictors.swabsbbc=t(otu_table(Family.bbc))
+response.beetlesfbc <- as.factor(sample_data(Family.bbc)$Family)
+rf.data.beetlesfbc <- data.frame(response.beetlesfbc, df_famsbbc)
+
+betForest.fc <- randomForest(response.beetlesfbc~., data = rf.data.beetlesfbc, ntree = 1000)
+print(betForest.fc)
+
+```
+
+control importance plots
+```{r}
+imp.betc <- importance(betForest.fc)#all the steps that are imp or imp. are building a dataframe that contains info about the taxa used by the Random Forest testto classify treatment 
+imp.betc <- data.frame(predictors = rownames(imp.betc), imp.betc)
+imp.sort.betc <- arrange(imp.betc, dplyr::desc(MeanDecreaseGini))
+imp.sort.betc$predictors <- factor(imp.sort.betc$predictors, levels = imp.sort.betc$predictors)
+imp.20.betc <- imp.sort.betc[1:15, ]
+imp.bet.plotc <- ggplot(imp.20.betc, aes(x = predictors, y = MeanDecreaseGini)) +
+  geom_bar(stat = "identity", fill = "lightblue4") +
+  coord_flip() +
+  ggtitle("Most important families bleach beetles")#\n in a string tells it to start a new line
+imp.bet.plotc
+#imp.20$MeanDecreaseGini
+otunames.betc <- imp.20.betc$predictors
+r.betc <- rownames(tax_table(Family.betc)) %in% otunames.betc
+otunames.betc
+PredictorTable.betc<-kable(tax_table(Family.betc)[r.betc, ])#returns a list of the most important predictors for Random Forest Classification
+PredictorTable.betc
+```
+
+
+importance plots 
+```{r, echo=TRUE}
+FambsRandomForestSubsetc = subset_taxa(Family.betc, row.names(tax_table(Family.betc))%in% otunames.betc)
+FambsRandomForestSubsetc
+
+dfc <- psmelt(FambsRandomForestSubsetc)
+dfc$Abundance=dfc$Abundance*100
+Trtdatac <- ddply(dfc, c("sample_Family", "Family"), summarise,
+                 N    = length(Abundance),
+                 mean = mean(Abundance),
+                 sd   = sd(Abundance),
+                 se   = sd / sqrt(N)
+)
+Trtdatac
+
+cdataplotc=ggplot(Trtdatac, aes(x=Family,y=mean))+geom_bar(aes(fill = Family),colour="black", stat="identity")+ facet_grid(~Family)+xlab("Family")+ylab("Relative Abundance") + theme(axis.text.x = element_text(angle = 45, hjust = 1))+theme(axis.title.x=element_blank())+facet_wrap(~sample_Family,scales = "free_y")+geom_errorbar(aes(ymin=mean-se,ymax=mean+se))+scale_fill_brewer(palette="Set1")
+cdataplotc
+
+
+compare_means(Abundance ~ sample_Family, data = dfc, group.by = "Family", p.adjust.method = "fdr",method="kruskal.test")
+```
+
+
+swabs!
+alpha diversity
+```{r}
+swab_richness_all2 <- estimate_richness(swabs_fam, measures = c("Observed", "Shannon", "InvSimpson"))
+setwd("C:/soil_data/summer.soil")
+swab_meta <- read.delim("swabs_meta.txt") #metadata file with Sample.ID and sample names with . not -
+swab_richness4 <- setDT(swab_richness_all2, keep.rownames = "Sample.ID")
+swab.div.meta <- merge(swab_richness4, swab_meta, by='Sample.ID', all.x=TRUE)
+swab.div.meta2 <- merge(swab_richness4, swab_meta, by='Sample.ID', all.x=TRUE)
+file.paths <- "C:/soil_data/summer.soil/plots/swab_alpha_wmeta3.csv"
+write.csv(swab.div.meta2, file=file.paths)
+```
+
+anova for alpha diversity
+```{r}
+##splitting data frame to each body site 
+
+#swabnew <- split(swab.div.meta2, swab.div.meta2$Family)
+#mouthnew <- swabnew$Mouth
+#recnew <- swabnew$Rectum
+#sknew <- swabnew$Skin
+#mouthnew<- mouthnew %>% mutate(Sampling.point = factor(Sampling.point))
+#recnew<- recnew %>% mutate(Sampling.point = factor(Sampling.point))
+#sknew<- sknew %>% mutate(Sampling.point = factor(Sampling.point))
+
+mouth_alphao <- lm(Observed~Treatment*Sampling.point, data = mouthnew)
+summary(mouth_alphao)
+plot(mouth_alphao)
+
+mouth_alphash <- lm(Shannon~Treatment*Sampling.point, data = mouthnew)
+summary(mouth_alphash)
+plot(mouth_alphash)
+
+mouth_alphais <- lm(InvSimpson~Treatment*Sampling.point, data = mouthnew)
+summary(mouth_alphais)
+plot(mouth_alphais)
+
+rec_alphao <- lm(Observed~Treatment*Sampling.point, data = recnew)
+summary(rec_alphao)
+plot(rec_alphao)
+
+rec_alphas <- lm(Shannon~Treatment*Sampling.point, data = recnew)
+summary(rec_alphas)
+plot(rec_alphas)
+
+rec_alphais <- lm(InvSimpson~Treatment*Sampling.point, data = recnew)
+summary(rec_alphais)
+plot(rec_alphais)
+
+sk_alphao <- lm(Observed~Treatment*Sampling.point, data = sknew)
+summary(sk_alphao)
+plot(sk_alphao)
+
+sk_alphas <- lm(Shannon~Treatment*Sampling.point, data = sknew)
+summary(sk_alphas)
+plot(sk_alphas)
+
+sk_alphais <- lm(InvSimpson~Treatment*Sampling.point, data = sknew)
+summary(sk_alphais)
+plot(sk_alphais)
+```
+pot-hoc testing 
+```{r}
+contsko<-emmeans(sk_alphao,~Sampling.point*Treatment)
+contsko
+contrasko<-as.data.frame(contrast(contsko, method = "pairwise")) 
+contrasko %>% arrange(p.value)
+
+contsks<-emmeans(sk_alphas,~Sampling.point*Treatment)
+contsks
+contrasks<-as.data.frame(contrast(contsks, method = "pairwise")) 
+contrasks %>% arrange(p.value)
+
+contskis<-emmeans(sk_alphais,~Sampling.point*Treatment)
+contskis
+contraskis<-as.data.frame(contrast(contskis, method = "pairwise")) 
+contraskis %>% arrange(p.value)
+
+contmo<-emmeans(mouth_alphao,~Sampling.point*Treatment)
+contmo
+contramo<-as.data.frame(contrast(contmo, method = "pairwise")) 
+contramo %>% arrange(p.value)
+
+contms<-emmeans(mouth_alphash,~Sampling.point*Treatment)
+contms
+contrams<-as.data.frame(contrast(contms, method = "pairwise")) 
+contrams %>% arrange(p.value)
+```
+
+
+permanova
+testing for relationship between carcass body area and time point
+```{r}
+GPdist.swabsf=phyloseq::distance(swabs_fam, "wunifrac")
+
+swabs.adonisf <- adonis2(GPdist.swabsf ~ Family*Sampling.point, as(sample_data(swabs_fam), "data.frame"), by="terms")
+swabs.adonisf
+
+swabs.adonis2f <- adonis2(GPdist.swabsf ~ Family*Carcass, as(sample_data(swabs_fam), "data.frame"), by="terms")
+swabs.adonis2f
+```
+permanova of body sites comparing control and bleach
+```{r}
+swab_skin <- subset_samples(swabs_fam, Family=="Skin")
+swab_mouth <- subset_samples(swabs_fam, Family=="Mouth")
+swab_rec <- subset_samples(swabs_fam, Family=="Rectum")
+```
+```{r}
+GPdist.skin=phyloseq::distance(swab_skin, "wunifrac")
+
+swabs.adonissk <- adonis2(GPdist.skin ~ Carcass*Sampling.point, as(sample_data(swab_skin), "data.frame"), by="terms")
+swabs.adonissk
+```
+```{r}
+GPdist.rec=phyloseq::distance(swab_rec, "wunifrac")
+
+swabs.adonisr <- adonis2(GPdist.rec ~ Carcass*Sampling.point, as(sample_data(swab_recci), "data.frame"), by="terms")
+swabs.adonisr
+```
+
+pcoa
+```{r}
+ord.swabs = ordinate(phy.ch4.swabsa, "PCoA", "unifrac", weighted=TRUE)
+
+plot.ord.sswab <- plot_ordination(phy.ch4.swabsa, ord.swabs, color = "Carcass", shape="Sampling.point" )+
+  geom_point(alpha = 0.7,size = 8) +
+  #xlab("PCoA1 (54%)") +
+  #ylab("PCoA2 (32.2%)") +
+  theme_classic() +
+  scale_color_brewer (palette = "Set3")+
+  scale_fill_discrete(labels = c("Control", "Under Carcass"))+
+  stat_ellipse(level=0.95)
+plot.ord.sswab$layers <- plot.ord.sswab$layers[-1]
+plot.ord.sswab
+
+plot.ord.sswab2 <- plot_ordination(phy.ch4.swabsa, ord.swabs, color = "Sampling.point", shape="Carcass" )+
+  geom_point(alpha = 0.7,size = 8) +
+  #xlab("PCoA1 (54%)") +
+  #ylab("PCoA2 (32.2%)") +
+  theme_classic() +
+  scale_color_brewer (palette = "Set3")+
+  scale_fill_discrete(labels = c("Control", "Under Carcass"))+
+  stat_ellipse(level=0.95)
+plot.ord.sswab2$layers <- plot.ord.sswab2$layers[-1]
+plot.ord.sswab2
+```
+
+looking at individual body sites now
+```{r}
+plot.ord.sswabbs <- plot_ordination(phy.ch4.swabsa, ord.swabs, color = "Sampling.point", shape="Family" )+
+  geom_point(alpha = 0.7,size = 8) +
+  #xlab("PCoA1 (54%)") +
+  #ylab("PCoA2 (32.2%)") +
+  theme_classic() +
+  scale_color_brewer (palette = "Set3")+
+  stat_ellipse(level=0.95)
+plot.ord.sswabbs$layers <- plot.ord.sswabbs$layers[-1]
+plot.ord.sswabbs
+
+plot.ord.sswabbs2 <- plot_ordination(phy.ch4.swabsa, ord.swabs, color = "Family", shape="Sampling.point" )+
+  geom_point(alpha = 0.7,size = 8) +
+  #xlab("PCoA1 (54%)") +
+  #ylab("PCoA2 (32.2%)") +
+  theme_classic() +
+  scale_color_brewer (palette = "Set3")+
+  stat_ellipse(level=0.95)
+plot.ord.sswabbs2$layers <- plot.ord.sswabbs2$layers[-1]
+plot.ord.sswabbs2
+```
+
+swabs family level 
+```{r}
+
+ord.swabs.fam = ordinate(swabs_fam, "PCoA", "unifrac", weighted=TRUE)
+
+plot.ord.sswab.fam <- plot_ordination(swabs_fam, ord.swabs.fam, color = "Carcass", shape="Sampling.point" )+
+  geom_point(alpha = 0.7,size = 8) +
+  #xlab("PCoA1 (54%)") +
+  #ylab("PCoA2 (32.2%)") +
+  theme_classic() +
+  scale_color_brewer (palette = "Set3")+
+  scale_fill_discrete(labels = c("Control", "Under Carcass"))+
+  stat_ellipse(level=0.95)
+plot.ord.sswab.fam$layers <- plot.ord.sswab.fam$layers[-1]
+plot.ord.sswab.fam
+
+plot.ord.sswab.fam2 <- plot_ordination(swabs_fam, ord.swabs.fam, color = "Carcass",shape="Family" )+
+  geom_point(alpha = 0.7,size = 8) +
+  xlab("PCoA1 (37.3%)") +
+  ylab("PCoA2 (16.7%)") +
+  theme_classic() +
+  scale_color_brewer (palette = "Set3")+
+  scale_fill_discrete(labels = c("Control", "Under Carcass"))+
+  stat_ellipse(level=0.95)
+plot.ord.sswab.fam2$layers <- plot.ord.sswab.fam2$layers[-1]
+plot.ord.sswab.fam2
+
+plot.ord.sswab.fam3 <- plot_ordination(swabs_fam, ord.swabs.fam, color = "Sampling.point",shape="Family" )+
+  geom_point(alpha = 0.7,size = 8) +
+  xlab("PCoA1 (37.3%)") +
+  ylab("PCoA2 (16.7%)") +
+  theme_classic() +
+  scale_color_brewer (palette = "Set3")+
+  guides(color=guide_legend(title = "Sampling point"))+
+  stat_ellipse(level=0.95)
+plot.ord.sswab.fam3$layers <- plot.ord.sswab.fam3$layers[-1]
+plot.ord.sswab.fam3
+
+```
+
+
+swabs bar plot
+saved 2050 x 800 (i think)
+```{r}
+merge_less_than_top <- function(pobject, top=7){
+  transformed <- transform_sample_counts(pobject, function(x) x/sum(x))
+  otu.table <- as.data.frame(otu_table(transformed))
+  otu.sort <- otu.table[order(rowMeans(otu.table), decreasing = TRUE),]
+  otu.list <- row.names(otu.sort[(top+1):nrow(otu.sort),])
+  merged <- merge_taxa(transformed, otu.list, 1)
+  for (i in 1:dim(tax_table(merged))[1]){
+    if (is.na(tax_table(merged)[i,2])){
+      taxa_names(merged)[i] <- "Other"
+      tax_table(merged)[i,1:7] <- "Other"}
+  }
+  return(merged)
+}
+
+family_orders <- c("Clostridiaceae", "Enterobacteriaceae", "Enterococcaceae", "Lactobacillaceae", "Moraxellaceae", "Morganellaceae", "Planococcaceae","Staphylococcaceae", "Streptococcaceae", "Vagococcaceae", "Wohlfahrtiimonadaceae", "Other")
+family_colorss <- c("Clostridiaceae"="#8DD3C7", "Enterobacteriaceae"="#FFFFB3", "Enterococcaceae"="#BEBADA", "Lactobacillaceae"="#FB8072", "Moraxellaceae"="#80B1D3", "Morganellaceae"="#FDB462", "Planococcaceae"="#B3DE69", "Staphylococcaceae"="#FCCDE5" , "Streptococcaceae"="#FFED6F", "Vagococcaceae"="#BC80BD", "Wohlfahrtiimonadaceae"="#CCEBC5", "Other"="#D9D9D9" )
+
+
+swabs_fam <- tax_glom(phy.ch4.swabsa, taxrank = "Family")
+swab.fam.top10 <- merge_less_than_top(swabs_fam, top=9)
+
+snew2 <- plot_bar(swab.fam.top10,fill = "Family")+
+  scale_fill_brewer(palette="Set3")+
+  ylab("Relative Abundance")
+snew2 <- snew2 + facet_wrap(~sample_Family, scales="free_x") #gets rid of the empty space
+snew2
+
+swab.fam.top12 <- merge_less_than_top(swabs_fam, top=11)
+
+snew3 <- plot_bar(swab.fam.top12,fill = "Family")+
+  scale_fill_manual(values = family_colorss, breaks = family_orders)+
+  ylab("Relative Abundance (%)")
+snew3 <- snew3 + facet_wrap(~sample_Family, scales="free_x") #gets rid of the empty space
+snew3
+
+
+snew4 <- plot_bar(swab.fam.top12, fill = "Family") +
+  scale_fill_manual(values = family_colorss, breaks = family_orders)+
+  ylab("Relative Abundance (%)")+
+  facet_grid(. ~ sample_Family + Sampling.point, scales = "free_x")
+
+snew4
+```
+
+permanova by individual body sites 
+comparing treatment and time
+```{r}
+swab_skin <- subset_samples(swabs_fam, Family=="Skin")
+swab_mouth <- subset_samples(swabs_fam, Family=="Mouth")
+swab_rec <- subset_samples(swabs_fam, Family=="Rectum")
+
+GPdist.skin=phyloseq::distance(swab_skin, "wunifrac")
+
+
+swabs.adonissk2 <- adonis2(GPdist.skin ~ Carcass, as(sample_data(swab_skin), "data.frame"), by="terms")
+swabs.adonissk2
+swabs.adonissk3 <- adonis2(GPdist.skin ~ Sampling.point, as(sample_data(swab_skin), "data.frame"), by="terms")
+swabs.adonissk3
+
+GPdist.rec=phyloseq::distance(swab_rec, "wunifrac")
+
+swabs.adonisr <- adonis2(GPdist.rec ~ Carcass*Sampling.point, as(sample_data(swab_rec), "data.frame"), by="terms")
+swabs.adonisr
+
+GPdist.mo=phyloseq::distance(swab_mouth, "wunifrac")
+
+swabs.adonism <- adonis2(GPdist.mo ~ Carcass*Sampling.point, as(sample_data(swab_mouth), "data.frame"), by="terms")
+swabs.adonism
+```
+```{r}
+swabs.adonissk2 <- adonis2(GPdist.skin ~ Carcass, as(sample_data(swab_skin), "data.frame"), by="terms")
+swabs.adonissk2
+swabs.adonissk3 <- adonis2(GPdist.skin ~ Sampling.point, as(sample_data(swab_skin), "data.frame"), by="terms")
+swabs.adonissk3
+swabs.adonisr2 <- adonis2(GPdist.rec ~ Carcass, as(sample_data(swab_rec), "data.frame"), by="terms")
+swabs.adonisr2
+swabs.adonisr3 <- adonis2(GPdist.rec ~ Sampling.point, as(sample_data(swab_rec), "data.frame"), by="terms")
+swabs.adonisr3
+swabs.adonism2 <- adonis2(GPdist.mo ~ Carcass, as(sample_data(swab_mouth), "data.frame"), by="terms")
+swabs.adonism2
+swabs.adonism3 <- adonis2(GPdist.mo ~ Sampling.point, as(sample_data(swab_mouth), "data.frame"), by="terms")
+swabs.adonism3
+```
+
+
+
+swab random forest
+together, then by body site 
+testing for time
+```{r}
+#beetles_bleach_fam <- tax_glom(phy.beetles.bleach, taxrank = "Family")
+
+set.seed(2000)
+GPr.swabs  = transform_sample_counts(phy.ch4.swabsa, function(x) x / sum(x) ) #transform samples based on relative abundance
+GPr.swabs = filter_taxa(GPr.swabs, function(x) mean(x) > 1e-5, TRUE)
+
+Family.swab<-tax_glom(GPr.swabs,"Family")
+
+
+otu.fam<-t(otu_table(Family.swab))
+
+df_fam<-as.data.frame(otu.fam)
+taxa_names(Family.swab)
+tax_table(Family.swab)
+identical(colnames(df_fam), taxa_names(Family.swab))
+colnames(df_fam)<-as.data.frame(tax_table(Family.swab))$Family
+df_fam
+
+Family.swab<-df_fam
+ps <- name_na_taxa(Family.swab)
+ps <- label_duplicate_taxa(Family.swab, tax_level = "Family", asv_as_id = F)
+
+
+family_counts_table <- as.data.frame(otu_table(ps))
+
+as.data.table(t(otu_table(Family.swab)))
+
+
+predictors.swab=t(otu_table(Family.swab))
+response.swab <- as.factor(sample_data(Family.swab)$Sampling.point)
+rf.data.swab <- data.frame(response.swab, df_fam)
+
+swabForest.f <- randomForest(response.swab~., data = rf.data.swab, ntree = 1000)
+print(swabForest.f)#returns overall Random Forest results
+
+```
+
+saved 1100x650
+```{r}
+imp.af <- importance(swabForest.f)#all the steps that are imp or imp. are building a dataframe that contains info about the taxa used by the Random Forest test to classify treatment 
+imp.af <- data.frame(predictors = rownames(imp.af), imp.af)
+imp.af.sort <- arrange(imp.af, dplyr::desc(MeanDecreaseGini))
+imp.af.sort$predictors <- factor(imp.af.sort$predictors, levels = imp.af.sort$predictors)
+imp.af.20 <- imp.af.sort[1:14, ]
+imp.af.20
+
+swab_all_imp <- ggplot(`imp.af.20`, aes(x = predictors, y = MeanDecreaseGini)) +
+  geom_bar(stat = "identity", fill = "lightblue4") +
+  coord_flip() +
+  xlab("Important Bacterial Families")+
+  ylab("Mean Decrease Gini")+
+  theme_bw()
+swab_all_imp
+  
+```
+
+
+saved 1900x900
+```{r, echo=TRUE}
+imp.af.5<-imp.af.20 %>% head(7)
+
+names.fam<-factor(imp.af.5$predictors)
+
+af.top.5<-rf.data.swab %>% select(all_of(names.fam)) %>% mutate(Sampling.point = response.swab)
+
+af.rf.barplot <- af.top.5 %>% pivot_longer(1:7, names_to = "Family", values_to ="Abundance") %>% dplyr::mutate(Abundance = 100*Abundance) %>% 
+dplyr::group_by(Sampling.point,Family) %>% dplyr::summarise(mean = mean(Abundance), 
+                                            N = length(Abundance),
+                 sd   = sd(Abundance),
+                 se   = sd / sqrt(N)) %>% 
+  ggplot(aes(x=Family,y=mean))+geom_bar(aes(fill = Family),colour="black", stat="identity")+ facet_grid(~Family)+xlab("Family")+ylab("Relative Abundance") + theme(axis.text.x = element_text(angle = 45, hjust = 1))+theme(axis.title.x=element_blank())+facet_wrap(~Sampling.point,scales = "free_y")+geom_errorbar(aes(ymin=mean-se,ymax=mean+se), width=0.5)+scale_fill_brewer(palette="Set1")
+
+af.rf.barplot
+```
+
+
+testing for body site 
+```{r}
+response.swabnew <- as.factor(sample_data(Family.swab)$Family)
+rf.data.swab.new <- data.frame(response.swabnew, predictors.swab)
+
+swabForest.f2 <- randomForest(response.swabnew~., data = rf.data.swab.new, ntree = 1000)
+print(swabForest.f2)#returns overall Random Forest results
+
+```
+
+now splitting by body site 
+```{r}
+phy.swabs.mouth <- subset_samples(phy.ch4.swabsa, Family=="Mouth")
+
+set.seed(2000)
+GPr.swabsm  = transform_sample_counts(phy.swabs.mouth, function(x) x / sum(x) ) #transform samples based on relative abundance
+GPr.swabsm = filter_taxa(GPr.swabsm, function(x) mean(x) > 1e-5, TRUE)
+
+Family.swabm<-tax_glom(GPr.swabsm,"Family")
+
+otu.famm<-t(otu_table(Family.swabm))
+
+df_famm<-as.data.frame(otu.famm)
+taxa_names(Family.swabm)
+tax_table(Family.swabm)
+identical(colnames(df_famm), taxa_names(Family.swabm))
+colnames(df_famm)<-as.data.frame(tax_table(Family.swabm))$Family
+df_famm
+
+
+predictors.swabm=t(otu_table(Family.swabm))
+response.swabm <- as.factor(sample_data(Family.swabm)$Sampling.point)
+rf.data.swabm <- data.frame(response.swabm, df_famm)
+
+swabForest.fm <- randomForest(response.swabm~., data = rf.data.swabm, ntree = 1000)
+print(swabForest.fm)
+
+```
+
+skin only 
+```{r}
+phy.swabs.skin <- subset_samples(phy.ch4.swabsa, Family=="Skin")
+
+set.seed(2000)
+GPr.swabss  = transform_sample_counts(phy.swabs.skin, function(x) x / sum(x) ) #transform samples based on relative abundance
+GPr.swabss = filter_taxa(GPr.swabss, function(x) mean(x) > 1e-5, TRUE)
+
+Family.swabs<-tax_glom(GPr.swabss,"Family")
+
+otu.fams<-t(otu_table(Family.swabs))
+
+df_fams<-as.data.frame(otu.fams)
+taxa_names(Family.swabs)
+tax_table(Family.swabs)
+identical(colnames(df_fams), taxa_names(Family.swabs))
+colnames(df_fams)<-as.data.frame(tax_table(Family.swabs))$Family
+df_fams
+
+
+predictors.swabs=t(otu_table(Family.swabs))
+response.swabs <- as.factor(sample_data(Family.swabs)$Sampling.point)
+rf.data.swabs <- data.frame(response.swabs, df_fams)
+
+swabForest.fs <- randomForest(response.swabs~., data = rf.data.swabs, ntree = 1000)
+print(swabForest.fs)
+```
+rectum only
+```{r}
+phy.swabs.rectum <- subset_samples(phy.ch4.swabsa, Family=="Rectum")
+
+set.seed(2000)
+GPr.swabr  = transform_sample_counts(phy.swabs.rectum, function(x) x / sum(x) ) #transform samples based on relative abundance
+GPr.swabr = filter_taxa(GPr.swabr, function(x) mean(x) > 1e-5, TRUE)
+
+Family.swabsr<-tax_glom(GPr.swabr,"Family")
+
+otu.famsr<-t(otu_table(Family.swabsr))
+
+df_famsr<-as.data.frame(otu.famsr)
+taxa_names(Family.swabsr)
+tax_table(Family.swabsr)
+identical(colnames(df_famsr), taxa_names(Family.swabsr))
+colnames(df_famsr)<-as.data.frame(tax_table(Family.swabsr))$Family
+df_famsr
+
+
+predictors.swabsr=t(otu_table(Family.swabsr))
+response.swabsr <- as.factor(sample_data(Family.swabsr)$Sampling.point)
+rf.data.swabsr <- data.frame(response.swabsr, df_famsr)
+
+swabForest.fr <- randomForest(response.swabsr~., data = rf.data.swabsr, ntree = 1000)
+print(swabForest.fr)
+```
+
+all swabs and time importance plots
+```{r}
+imp.swab <- importance(swabForest.f)#all the steps that are imp or imp. are building a dataframe that contains info about the taxa used by the Random Forest testto classify treatment 
+imp.swab <- data.frame(predictors = rownames(imp.swab), imp.swab)
+imp.sort.swab <- arrange(imp.swab, dplyr::desc(MeanDecreaseGini))
+imp.sort.swab$predictors <- factor(imp.sort.swab$predictors, levels = imp.sort.swab$predictors)
+imp.20.swab <- imp.sort.swab[1:15, ]
+imp.bet.plotsa <- ggplot(imp.20.swab, aes(x = predictors, y = MeanDecreaseGini)) +
+  geom_bar(stat = "identity", fill = "lightblue4") +
+  coord_flip() +
+  ggtitle("Most important families bleach beetles")#\n in a string tells it to start a new line
+imp.bet.plotsa
+#imp.20$MeanDecreaseGini
+otunames.swab <- imp.20.swab$predictors
+r.swab <- rownames(tax_table(Family.swab)) %in% otunames.swab
+otunames.swab
+PredictorTable.swab<-kable(tax_table(Family.swab)[r.swab, ])#returns a list of the most important predictors for Random Forest Classification
+PredictorTable.swab
+```
+
+importance barplots
+saved 1900x900
+```{r, echo=TRUE}
+FambsRandomForestSubsetfa = subset_taxa(Family.swab, row.names(tax_table(Family.swab))%in% otunames.swab)
+FambsRandomForestSubsetfa
+
+dfsa <- psmelt(FambsRandomForestSubsetfa)
+dfsa$Abundance=dfsa$Abundance*100
+Trtdatasa <- ddply(dfsa, c("Sampling.point", "Family"), summarise,
+                 N    = length(Abundance),
+                 mean = mean(Abundance),
+                 sd   = sd(Abundance),
+                 se   = sd / sqrt(N)
+)
+Trtdatasa
+
+cdataplotsa=ggplot(Trtdatasa, aes(x=Family,y=mean))+geom_bar(aes(fill = Family),colour="black", stat="identity")+ facet_grid(~Sampling.point)+xlab("Family")+ylab("Relative Abundance") + theme(axis.text.x = element_text(angle = 45, hjust = 1))+theme(axis.title.x=element_blank())+facet_wrap(~Sampling.point,scales = "free_y")+geom_errorbar(aes(ymin=mean-se,ymax=mean+se))+scale_fill_brewer(palette="Set1")
+cdataplotsa
+
+cdataplot2sa=ggplot(Trtdatasa, aes(x=Family,y=mean))+geom_bar(aes(fill = Family),colour="black", stat="identity")+ facet_grid(~Family)+ylab("Relative Abundance") +theme(axis.title.x=element_blank())+facet_wrap(~sample_Family,scales = "free_y")+geom_errorbar(aes(ymin=mean-se,ymax=mean+se))+scale_fill_brewer(palette="Set1")
+cdataplot2sa
+
+
+compare_means(Abundance ~ sample_Family, data = dfsa, group.by = "Family", p.adjust.method = "fdr",method="kruskal.test")
+```
+
+
+
+read in data of all three sample types (beetles, swabs, soil) + filter
+```{r}
+setwd("C:/soil_data/summer.soil")
+
+#all together
+phy.summer4 <-qza_to_phyloseq(features="summer-table-no-mito.qza",taxonomy="summer-taxonomy.qza",metadata="summer-meta2.tsv")
+
+phy.summer.filt4 <- prune_samples(sample_sums(phy.summer4) >= 12000, phy.summer4) #removing samples that have less than 12000 reads, not rarefying any 
+phy.stillnew2 <- subset_samples(phy.summer.filt4, Size=="Still")
+ch4all <- merge_phyloseq(phy.stillnew2, phy.swab.beetle5)
+ch4all <- subset_samples(ch4all, Family != "")
+
+```
+treatments
+```{r}
+ch4bleach <- subset_samples(ch4all, Carcass %in% c("B1", "B2", "B3", "B4", "B5"))
+ch4cntrl <- subset_samples(ch4all, Carcass %in% c("C22", "C23", "C24", "C25", "C26"))
+
+bleach_fam <- tax_glom(ch4bleach, taxrank = "Family")
+control_fam <- tax_glom(ch4cntrl, taxrank = "Family")
+
+```
+
+
+venn diagram of overlapping families among sample types 
+1400x800
+```{r}
+
+bleach_venn <- ggvenn_pq(bleach_fam, fact = "Order", taxonomic_rank = "Family", category.names = c("Soil Control", "Soil Underneath", "Coleoptera", "Carcass")) +
+  scale_fill_distiller(palette = "BuPu", direction = 1)
+bleach_venn
+
+bleach_vennnew <- ggvenn_pq(bleach_fam, fact = "Order", taxonomic_rank = "Family", return_data_for_venn = TRUE)
+```
+barplot of carabidae and staph relative abundance over time
+```{r}
+relabdat <- data.frame(
+  days = c(3,5,9), 
+  carabidaeb =c(1, 0.73, 0), 
+  carabidaec = c(0.93, 0.5, 0.19), 
+  staphb =c(0, 0.091, 0.64), 
+  staphc = c(0, 0.14, 0.76)
+)
+
+dat.melt <- reshape2::melt(relabdat, id.vars="days")
+
+realplot <- ggplot(dat.melt, aes(x=days, y=value, fill=variable))+
+  geom_col(position="dodge")+
+  theme_bw()+
+  scale_fill_brewer("Beetle Family and Treatment", palette="Set2", labels = c("Carabidae, B", "Carabidae, C", "Staphylinidae, B", "Staphylinidae, C"))+
+  scale_x_continuous(labels = NULL, breaks = NULL)+
+  labs(x=NULL, y="Relative Abundance")+
+  facet_wrap(~days, scales="free_x")
+realplot
+
+```
+
